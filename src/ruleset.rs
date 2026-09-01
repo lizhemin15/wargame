@@ -64,6 +64,13 @@ pub struct UnitType {
     /// 防御力
     #[serde(default)]
     pub defense: u32,
+    /// 攻击射程（格）：1=相邻，>1=远程（炮兵/火炮）。默认 1。
+    #[serde(default = "default_range")]
+    pub range: u32,
+}
+
+fn default_range() -> u32 {
+    1
 }
 
 /// 初始部署项
@@ -77,6 +84,30 @@ pub struct DeployEntry {
     /// 归属方（0=红方, 1=蓝方, ...）
     #[serde(default)]
     pub owner: u8,
+}
+
+/// 可占领的要点/要地（胜利目标，动态易手）
+#[derive(Debug, Clone, Deserialize)]
+pub struct Objective {
+    pub name: String,
+    /// 所在格（行、列）
+    pub row: u8,
+    pub col: u8,
+}
+
+/// 胜负条件
+#[derive(Debug, Clone, Deserialize)]
+pub struct Victory {
+    /// 需占领的要点数达到此值即胜
+    #[serde(default = "default_need")]
+    pub need_points: u32,
+    /// 消灭指挥类单位即胜（可选：指挥官 id 列表）
+    #[serde(default)]
+    pub commanders: Vec<String>,
+}
+
+fn default_need() -> u32 {
+    1
 }
 
 /// 地形网格（棋盘'画布'）
@@ -104,7 +135,14 @@ pub struct Ruleset {
     /// 地形网格
     pub terrain: TerrainGrid,
     /// 初始部署
+    #[serde(default)]
     pub deploy: Vec<DeployEntry>,
+    /// 可占领要点（胜利目标）
+    #[serde(default)]
+    pub objectives: Vec<Objective>,
+    /// 胜负条件
+    #[serde(default)]
+    pub victory: Option<Victory>,
     /// 通过 checker 校验后的结果（缓存用于渲染提示，非规则逻辑）
     #[serde(skip)]
     pub _meta: (),
@@ -127,6 +165,33 @@ impl Ruleset {
                     "幽灵兵种: 部署引用 '{}' 但 units 未定义 (可用: {:?})",
                     d.kind,
                     self.units.keys().collect::<Vec<_>>()
+                ));
+            }
+            // 部署坐标必须在网格内
+            if d.row as usize >= self.terrain.rows || d.col as usize >= self.terrain.cols {
+                return Err(format!(
+                    "部署越界: '{}' @ ({},{}) 超出网格 {}x{}",
+                    d.kind, d.row, d.col, self.terrain.rows, self.terrain.cols
+                ));
+            }
+            // 部署格必须可通行
+            let idx = d.row as usize * self.terrain.cols + d.col as usize;
+            let ch = self.terrain.cells[idx].chars().next().unwrap_or('?');
+            let terrain_passable = self.terrains.values().any(|t| t.symbol == ch && t.move_cost > 0);
+            if !terrain_passable {
+                return Err(format!(
+                    "部署位置不可通行: '{}' @ ({},{}) 落在 '{}' 上（水域/障碍）",
+                    d.kind, d.row, d.col, ch
+                ));
+            }
+        }
+
+        // 1b. 要点坐标必须在网格内
+        for (i, obj) in self.objectives.iter().enumerate() {
+            if obj.row as usize >= self.terrain.rows || obj.col as usize >= self.terrain.cols {
+                return Err(format!(
+                    "要点越界: 目标[{}] '{}' @ ({},{}) 超出网格 {}x{}",
+                    i, obj.name, obj.row, obj.col, self.terrain.rows, self.terrain.cols
                 ));
             }
         }

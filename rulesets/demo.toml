@@ -53,6 +53,7 @@ move_style = "leap"                     # 跳跃，无视路径地形
 move_offsets = [[2,1],[1,2],[-1,2],[-2,1],[-2,-1],[-1,-2],[1,-2],[2,-1]]
 attack = 4
 defense = 3
+range = 1
 
 [units.rook]
 name = "战车"
@@ -62,6 +63,7 @@ move_style = "slide"                    # 滑行，直线走到阻挡/移动点�
 move_offsets = [[1,0],[-1,0],[0,1],[0,-1]]
 attack = 5
 defense = 4
+range = 1
 
 [units.infantry]
 name = "步兵"
@@ -71,8 +73,10 @@ move_style = "step"                     # 单步，受地形代价约束
 move_offsets = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]
 attack = 2
 defense = 2
+range = 1
 
 # ---- 地形网格（8x8，'.'=平原, '~'=水, '^'=山地, 'F'=森林） ----
+# 中央湖泊岛(3,3)=森林作为视觉地形；可夺高地(crown)在(5,4)平原。
 [terrain]
 rows = 8
 cols = 8
@@ -87,19 +91,8 @@ cells = [
   ".",".",".","^",".",".",".","F",
 ]
 
-# ---- 初始部署 ----
-[[deploy]]
-kind = "knight"
-row = 7
-col = 1
-owner = 0
-
-[[deploy]]
-kind = "rook"
-row = 7
-col = 2
-owner = 0
-
+# ---- 初始部署（紧凑战术对抗：0方在下、1方在上，贴身便于演示攻防）----
+# 0方（owner 0, 白/小写）: 步兵#1 骑士#2 战车#3
 [[deploy]]
 kind = "infantry"
 row = 6
@@ -108,7 +101,26 @@ owner = 0
 
 [[deploy]]
 kind = "knight"
-row = 0
+row = 5
+col = 6
+owner = 0
+
+[[deploy]]
+kind = "rook"
+row = 6
+col = 6
+owner = 0
+
+# 1方（owner 1, 黑/大写）: 步兵#4(贴身防己方高地入口) 骑士#5 战车#6
+[[deploy]]
+kind = "infantry"
+row = 4
+col = 6
+owner = 1
+
+[[deploy]]
+kind = "knight"
+row = 1
 col = 6
 owner = 1
 
@@ -118,8 +130,13 @@ row = 0
 col = 5
 owner = 1
 
-[[deploy]]
-kind = "infantry"
-row = 1
+# ---- 可占领要点（胜利目标）：中央平原地带的可夺高地 ----
+[[objectives]]
+name = "中央高地"
+row = 5
 col = 4
-owner = 1
+
+# ---- 胜负条件：先占领 1 个要点者胜 ----
+[victory]
+need_points = 1
+commanders = []

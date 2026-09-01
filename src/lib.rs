@@ -13,6 +13,7 @@ pub mod board;
 pub mod engine;
 pub mod event;
 pub mod host;
+pub mod combat;
 pub mod move_rules;
 pub mod ruleset;
 

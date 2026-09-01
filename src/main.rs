@@ -68,52 +68,86 @@ fn main() {
     render(&eng.board.to_units_vec(), &rs, rows, cols);
     println!("事件日志: 0 条，确定性自检: {}", eng.deterministic_check());
 
-    // —— 数据驱动移动测试 ——
-    println!("\n=== 移动判定（数据驱动：几何 + 地形） ===");
+    // —— 攻击判定（M2.1 纯计算：攻防+地形，无掷骰）——
+    println!("\n=== 攻击判定（数据驱动：攻防 + 射程，无掷骰） ===");
 
-    // 骑士 leap 马跳
-    let r = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(5, 2) });
+    // 贴身攻击：0方骑士#2(5,6) 攻击 1方步兵#4(4,6)
+    // 骑士 attack4 vs 步兵 defense2 + 平原0 → 4>=2 → hit! 歼灭步兵#4
+    let r = eng.submit(Command::Attack { unit: 2, target: 4 });
     println!(
-        "骑士#1 (7,1)→(5,2) 马跳平原 : {}",
+        "骑士#2 (5,6) 攻击步兵#4 (4,6) 贴身 : {}",
         outcome_str(&r)
     );
 
-    // 战车 slide 直线（被山地/水域阻挡测试）
-    let r2 = eng.submit(Command::Move { unit: 2, to: eng.board.cell_at(7, 5) });
+    // 射程外攻击拒绝：1方骑士#5(1,6) 打 0方战车#3(6,6)，曼哈顿距离>range=1
+    let r2 = eng.submit(Command::Attack { unit: 5, target: 3 });
     println!(
-        "战车#2 (7,2)→(7,5) 直线(穿(7,3)山地) : {}",
+        "骑士#5 (1,6) 攻击战车#3 (6,6) 超射程 : {}",
         outcome_str(&r2)
     );
 
-    // 步兵 step + 地形代价
-    let r3 = eng.submit(Command::Move { unit: 3, to: eng.board.cell_at(5, 4) });
+    // —— 数据驱动移动测试 ——
+    println!("\n=== 移动判定（数据驱动：几何 + 地形） ===");
+
+    // 骑士 leap 跳入水域非法（落点须可通行）——骑士#2 仍在(5,6)
+    let r_leap_water = eng.submit(Command::Move { unit: 2, to: eng.board.cell_at(4, 4) });
     println!(
-        "步兵#3 (6,3)→(5,4) 一步(森林) : {}",
+        "骑士#2 (5,6)→(4,4) 马跳落水域 : {}",
+        outcome_str(&r_leap_water)
+    );
+
+    // 骑士 leap 合法：跨水域跳到陆地(3,5)
+    let r3 = eng.submit(Command::Move { unit: 2, to: eng.board.cell_at(3, 5) });
+    println!(
+        "骑士#2 (5,6)→(3,5) 马跳跨水落平原 : {}",
         outcome_str(&r3)
+    );
+
+    // 战车 slide 直线（向下无阻挡）
+    let r4 = eng.submit(Command::Move { unit: 3, to: eng.board.cell_at(7, 6) });
+    println!(
+        "战车#3 (6,6)→(7,6) 直线滑行 : {}",
+        outcome_str(&r4)
     );
 
     println!("\n=== 非法走法（数据驱动拒绝） ===");
     // 骑士非马跳
-    let r4 = eng.submit(Command::Move { unit: 4, to: eng.board.cell_at(0, 4) });
+    let r5 = eng.submit(Command::Move { unit: 5, to: eng.board.cell_at(2, 6) });
     println!(
-        "骑士#4 (0,6)→(0,4) 竖两格非马跳 : {}",
-        outcome_str(&r4)
-    );
-    // 战车斜线（slide 非直线）
-    let r5 = eng.submit(Command::Move { unit: 5, to: eng.board.cell_at(1, 6) });
-    println!(
-        "战车#5 (0,5)→(1,6) 斜线非法 : {}",
+        "骑士#5 (1,6)→(2,6) 竖一格非马跳 : {}",
         outcome_str(&r5)
     );
-    // 步兵进水域
-    let r6 = eng.submit(Command::Move { unit: 6, to: eng.board.cell_at(2, 4) });
+    // 战车斜线（slide 非直线）
+    let r6 = eng.submit(Command::Move { unit: 6, to: eng.board.cell_at(1, 6) });
     println!(
-        "步兵#6 (1,4)→(2,4) 跨水域不可通行 : {}",
+        "战车#6 (0,5)→(1,6) 斜线非法 : {}",
         outcome_str(&r6)
+    );
+
+    // —— 夺点 + 胜负（M2.1）——
+    println!("\n=== 夺点 → 胜负判定（） ===");
+
+    // 0方步兵#1(6,3) 两连步走向中央高地(5,4)，占领即胜
+    let r7 = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(5, 3) });
+    println!(
+        "步兵#1 (6,3)→(5,3) 接近高地 : {}",
+        outcome_str(&r7)
+    );
+    let r8 = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(5, 4) });
+    println!(
+        "步兵#1 (5,3)→(5,4) 占领中央高地 : {}",
+        outcome_str(&r8)
     );
 
     println!("\n--- 终局 ---");
     render(&eng.board.to_units_vec(), &rs, rows, cols);
+    if let Some(winner) = eng.winner() {
+        let who = if winner == 0 { "0方(白)" } else { "1方(黑)" };
+        println!("🏆 胜者: {}（owner {}）", who, winner);
+    } else {
+        println!("（未分胜负——尚无一方达成胜利条件）");
+    }
+    println!("已占领要点: {:?}", eng.board.objective_owners(&rs));
     println!("事件日志: {} 条", eng.logs.len());
     println!("确定性自检 (replay==board): {}", eng.deterministic_check());
     println!("日志 SHA-256: {}", eng.logs_hash());
