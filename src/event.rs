@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 棋盘坐标（扁平索引，row*cols+col）
-pub type Cell = u8;
+pub type Cell = u16;
 
 /// 单位 ID
 pub type UnitId = u8;

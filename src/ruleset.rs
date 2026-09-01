@@ -174,11 +174,18 @@ impl Ruleset {
                     d.kind, d.row, d.col, self.terrain.rows, self.terrain.cols
                 ));
             }
-            // 部署格必须可通行
+            // 部署格必须可通行（军舰类 unit 例外：可部署/逗留在水域）
             let idx = d.row as usize * self.terrain.cols + d.col as usize;
             let ch = self.terrain.cells[idx].chars().next().unwrap_or('?');
-            let terrain_passable = self.terrains.values().any(|t| t.symbol == ch && t.move_cost > 0);
-            if !terrain_passable {
+            let is_naval = self
+                .units
+                .get(&d.kind)
+                .map(|u| u.class == "naval")
+                .unwrap_or(false);
+            let terrain_passable =
+                self.terrains.values().any(|t| t.symbol == ch && t.move_cost > 0);
+            let is_water = self.terrains.values().any(|t| t.symbol == ch && t.move_cost == 0);
+            if !terrain_passable && !(is_naval && is_water) {
                 return Err(format!(
                     "部署位置不可通行: '{}' @ ({},{}) 落在 '{}' 上（水域/障碍）",
                     d.kind, d.row, d.col, ch

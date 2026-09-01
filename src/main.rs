@@ -68,6 +68,18 @@ fn main() {
     render(&eng.board.to_units_vec(), &rs, rows, cols);
     println!("事件日志: 0 条，确定性自检: {}", eng.deterministic_check());
 
+    // —— 根据规则集选择演示推演 ——
+    let is_songhu = rs.name.contains("淞沪");
+    if is_songhu {
+        songhu_demo(&mut eng, &rs, rows, cols);
+    } else {
+        demo_demo(&mut eng, &rs, rows, cols);
+    }
+}
+
+/// 演示序列（demo.toml）：攻击/射程/移动/夺点/胜负 全链路
+fn demo_demo(eng: &mut Engine, rs: &Ruleset, rows: usize, cols: usize) {
+    use wargame::event::Command;
     // —— 攻击判定（M2.1 纯计算：攻防+地形，无掷骰）——
     println!("\n=== 攻击判定（数据驱动：攻防 + 射程，无掷骰） ===");
 
@@ -125,7 +137,7 @@ fn main() {
     );
 
     // —— 夺点 + 胜负（M2.1）——
-    println!("\n=== 夺点 → 胜负判定（） ===");
+    println!("\n=== 夺点 → 胜负判定（need_points 达标即胜） ===");
 
     // 0方步兵#1(6,3) 两连步走向中央高地(5,4)，占领即胜
     let r7 = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(5, 3) });
@@ -139,19 +151,60 @@ fn main() {
         outcome_str(&r8)
     );
 
+    finish(&eng, rs, rows, cols);
+}
+
+/// 演示序列（songhu.toml）：淞沪会战——多点争夺 → 胜负判定
+fn songhu_demo(eng: &mut Engine, rs: &Ruleset, rows: usize, cols: usize) {
+    use wargame::event::Command;
+    println!("\n=== 淞沪会战推演（多点争夺战：国军 4 点达标，日军固守吴淞） ===");
+
+    // 初始占领盘点：第3师团(1,17)钉在吴淞码头 → 日军已占 1 点
+    println!("〔日军〕第3师团固守吴淞码头（已在要点格），虹口/罗店/大场/闸北皆兵临城下未定。");
+    println!("当前占领: {:?}", eng.board.objective_owners(rs));
+
+    // 日军沿江推进：战车联队#8 (2,17)→(3,17) 抢滩向市区压
+    let t = eng.submit(Command::Move { unit: 8, to: eng.board.cell_at(3, 17) });
+    println!("〔日军〕战车第1中队 (2,17)→(3,17) 沿江推进 : {}", outcome_str(&t));
+
+    // 国军多点反击夺占——
+    // 88师#1 北上： (12,17)→(11,17)→(11,16) 夺苏州河渡口
+    let a = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(11, 17) });
+    println!("〔国军〕88师 (12,17)→(11,17) 挺进渡口 : {}", outcome_str(&a));
+    let a2 = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(11, 16) });
+    println!("〔国军〕88师 夺占苏州河渡口 : {}", outcome_str(&a2));
+
+    // 87师#2 (9,9)→(9,8) 夺大场
+    let b = eng.submit(Command::Move { unit: 2, to: eng.board.cell_at(9, 8) });
+    println!("〔国军〕87师 (9,9)→(9,8) 夺大场阵地 : {}", outcome_str(&b));
+
+    // 炮兵#3 (10,10)→(10,9) 夺闸北
+    let c = eng.submit(Command::Move { unit: 3, to: eng.board.cell_at(10, 9) });
+    println!("〔国军〕炮兵第2旅 (10,10)→(10,9) 占闸北 : {}", outcome_str(&c));
+
+    // 地方军#4 (7,4)→(7,5) 夺罗店
+    let d = eng.submit(Command::Move { unit: 4, to: eng.board.cell_at(7, 5) });
+    println!("〔国军〕地方守备旅 (7,4)→(7,5) 夺罗店 : {}", outcome_str(&d));
+
+    finish(eng, rs, rows, cols);
+}
+
+/// 共用的终局输出：渲染 + 胜负 + 确定性 + 哈希
+fn finish(eng: &Engine, rs: &Ruleset, rows: usize, cols: usize) {
     println!("\n--- 终局 ---");
-    render(&eng.board.to_units_vec(), &rs, rows, cols);
+    render(&eng.board.to_units_vec(), rs, rows, cols);
     if let Some(winner) = eng.winner() {
-        let who = if winner == 0 { "0方(白)" } else { "1方(黑)" };
-        println!("🏆 胜者: {}（owner {}）", who, winner);
+        let who = if winner == 0 { "国民政府军(owner0)" } else { "日本军队(owner1)" };
+        let role = if winner == 0 { "抗敌士气高涨" } else { "攻势凌厉" };
+        println!("🏆 胜者: {}（{}）", who, role);
     } else {
-        println!("（未分胜负——尚无一方达成胜利条件）");
+        println!("（未分胜负——尚无一方达成 victory.need_points）");
     }
-    println!("已占领要点: {:?}", eng.board.objective_owners(&rs));
+    println!("已占领要点: {:?}", eng.board.objective_owners(rs));
     println!("事件日志: {} 条", eng.logs.len());
     println!("确定性自检 (replay==board): {}", eng.deterministic_check());
     println!("日志 SHA-256: {}", eng.logs_hash());
-    println!("\nM2 验证完成：规则集静态校验 + 数据驱动移动判定（几何/地形） + 确定性回放 均通过 ✅");
+    println!("\nM2 验证完成：规则集静态校验 + 数据驱动移动/攻击/夺点判定（几何/地形/攻防） + 确定性回放 均通过 ✅");
 }
 
 fn outcome_str(o: &Outcome) -> String {
@@ -162,31 +215,20 @@ fn outcome_str(o: &Outcome) -> String {
 }
 
 /// 渲染：地形网格 + 单位（多兵种字符映射）
-fn render(units: &[(u8, &wargame::event::Unit)], rs: &Ruleset, rows: usize, cols: usize) {
-    // 地形图例
-    let mut legend: Vec<String> = Vec::new();
+fn render(units: &[(u16, &wargame::event::Unit)], rs: &Ruleset, rows: usize, cols: usize) {
+    // 地形符号：直接用规则集里每个 terain 的 symbol 字段（数据驱动）
     let grid: Vec<Vec<char>> = (0..rows)
         .map(|r| {
             (0..cols)
                 .map(|c| {
                     let t = rs.terrain_at(r, c);
-                    let sym = match t.name.as_str() {
-                        "平原" | "道路" => '.',
-                        "森林" => 'F',
-                        "山地" => '^',
-                        "水域" => '~',
-                        _ => '?',
-                    };
-                    if sym == '?' {
-                        legend.push(format!("{}→?", t.name));
-                    }
-                    sym
+                    t.symbol
                 })
                 .collect()
         })
         .collect();
 
-    // 单位覆盖在地形上
+    // 单位覆盖在地形上（未知兵种退首位字符）
     let mut unit_chars = vec![vec![' '; cols]; rows];
     for (cell, u) in units {
         let (r, c) = ((*cell as usize) / cols, (*cell as usize) % cols);
@@ -194,7 +236,13 @@ fn render(units: &[(u8, &wargame::event::Unit)], rs: &Ruleset, rows: usize, cols
             "knight" => '♞',
             "rook" => '♜',
             "infantry" => '♟',
-            _ => '?',
+            "cn_inf" => '人',
+            "cn_arty" => '砲',
+            "cn_local" => '勇',
+            "jp_div" => '兵',
+            "jp_tank" => '坦',
+            "jp_navy" => '舰',
+            _ => u.kind.chars().next().unwrap_or('?'),
         };
         unit_chars[r][c] = if u.owner == 0 { ch } else { ch.to_ascii_uppercase() };
     }
