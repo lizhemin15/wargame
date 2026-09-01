@@ -1,0 +1,91 @@
+name: release
+
+# 打 tag 时云编译三平台一键安装包
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x86_64
+            ext: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            suffix: macos-x86_64
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            suffix: macos-aarch64
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x86_64
+            ext: .exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      # macOS aarch64 从 x86_64 runner 交叉编译需要 target
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+        
+      - name: Inspect build output
+        shell: bash
+        run: |
+          ls -la target/${{ matrix.target }}/release/
+
+      # 打包：二进制 + 安装说明
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/wargame${{ matrix.ext }}"
+          PKG="wargame-${{ matrix.suffix }}${{ matrix.ext }}"
+          mkdir -p dist
+          cp "$BIN" "dist/$PKG"
+          # 附带许可证 / 说明
+          cp LICENSE dist/ 2>/dev/null || true
+          cp README.md dist/ 2>/dev/null || true
+          echo "packaged: dist/$PKG"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wargame-${{ matrix.suffix }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la /tmp/artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/artifacts/*
+          generate_release_notes: true
