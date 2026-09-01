@@ -1,19 +1,21 @@
 //! 棋盘状态（事件溯源的可折叠状态）
 //! 状态只由 apply() 折叠事件而来，是纯函数，无 IO/随机。
+//! M2：棋盘尺寸/地形/初始部署全部来自 ruleset（数据驱动）。
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Cell, Event, Unit, UnitId};
-
-/// 棋盘尺寸 8x8
-pub const SIZE: usize = 8;
-pub const CELLS: usize = SIZE * SIZE;
+use crate::ruleset::Ruleset;
 
 /// 棋盘状态：单位按 id 存，另建 cell→unit 索引
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Board {
+    /// 行数
+    pub rows: usize,
+    /// 列数
+    pub cols: usize,
     /// unit_id -> unit
     pub units: BTreeMap<UnitId, Unit>,
     /// cell -> unit_id（占位索引）
@@ -21,13 +23,49 @@ pub struct Board {
 }
 
 impl Board {
-    /// 初始布局（回到开局）
-    pub fn initial() -> Self {
-        let mut b = Board::default();
-        // 演示：红马在 e4 (格4)，黑马在 f6 (格45)
-        b.place(Unit { id: 1, kind: "knight".into(), cell: 4, owner: 0 });
-        b.place(Unit { id: 2, kind: "knight".into(), cell: 45, owner: 1 });
+    /// 从 ruleset 构建初始棋盘（布局来自 deploy 数据）
+    pub fn from_ruleset(rs: &Ruleset) -> Board {
+        let mut b = Board {
+            rows: rs.terrain.rows,
+            cols: rs.terrain.cols,
+            units: BTreeMap::new(),
+            occ: BTreeMap::new(),
+        };
+        for (i, d) in rs.deploy.iter().enumerate() {
+            let cell = b.cell_at(d.row as usize, d.col as usize);
+            b.place(Unit {
+                id: (i + 1) as UnitId,
+                kind: d.kind.clone(),
+                cell,
+                owner: d.owner,
+            });
+        }
         b
+    }
+
+    /// 空棋盘（测试/自定义用）
+    pub fn empty(rows: usize, cols: usize) -> Board {
+        Board {
+            rows,
+            cols,
+            units: BTreeMap::new(),
+            occ: BTreeMap::new(),
+        }
+    }
+
+    /// (row, col) → 扁平 cell
+    pub fn cell_at(&self, row: usize, col: usize) -> Cell {
+        (row * self.cols + col) as Cell
+    }
+
+    /// 扁平 cell → (row, col)
+    pub fn to_rc(&self, cell: Cell) -> (usize, usize) {
+        ((cell as usize) / self.cols, (cell as usize) % self.cols)
+    }
+
+    /// cell 是否在棋盘内
+    pub fn in_bounds(&self, row: usize, col: usize) -> bool {
+        row < self.rows && col < self.cols
     }
 
     /// 放置一个单位（初始化和载入用）

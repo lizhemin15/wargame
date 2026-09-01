@@ -1,16 +1,16 @@
-//! 确定性引擎核心：把 命令 →(Lua 裁决管线)→ 事件 → 折叠状态
+//! 确定性引擎核心：把 命令 →(裁决管线)→ 事件 → 折叠状态
 //!
-//! 裁决管线（纯同步，无 IO/随机/墙钟）：
+//! M2 裁决管线（M1 Lua 规则即插件 → 数据驱动 ruleset 优先）：
 //!   submit(Command)
-//!     → 定位单位，取其兵种插件
-//!     → 依次执行裁决管线 [兵种插件, 裁判插件, ...]（注册顺序）
+//!     → 定位单位
+//!     → ① 数据驱动判定（ruleset.can_move：兵种几何 + 地形 + 移动点）—— 主闸
+//!     → ② Lua 自定义插件钩子（可选：士气/域效果/特殊规则）—— 增强层
 //!     → 全过 → 生成 MoveAccepted 事件，append 到日志，折叠进状态
 //!     → 任一不过 → 拒绝，无事件，状态不变
 //!
-//! 规则即插件：改/加规则 = 增删管道里的插件，Rust 内核零改动。
-//!
 //! 确定性保证：
 //!   - logs 是唯一事实源；状态由 replay(logs) 折叠，绝不直接改
+//!   - ruleset 是规范数据输入；判定纯函数无 IO/随机
 //!   - 引擎不依赖任何非确定性输入
 
 use sha2::{Digest, Sha256};
@@ -19,6 +19,8 @@ use std::rc::Rc;
 use crate::board::Board;
 use crate::event::{Command, Event};
 use crate::host::PluginRepo;
+use crate::move_rules;
+use crate::ruleset::Ruleset;
 
 /// 一次提交的结果
 #[derive(Debug, Clone, PartialEq)]
@@ -33,19 +35,23 @@ pub enum Outcome {
 pub struct Engine {
     pub logs: Vec<Event>,
     pub board: Board,
+    pub ruleset: Ruleset,
     pub plugins: Rc<PluginRepo>,
-    /// 裁决管线：单位兵种插件 + 裁判插件（未来可扩展顺序）
+    /// Lua 自定义插件钩子（增强层，可空）。数据驱动判定后再叠这些。
     pub endorse_order: Vec<String>,
 }
 
 impl Engine {
-    pub fn new(board: Board, plugins: Rc<PluginRepo>) -> Self {
+    /// 从 ruleset 构建引擎（初始棋盘来自 ruleset.deploy 数据）。
+    pub fn from_ruleset(ruleset: Ruleset, plugins: Rc<PluginRepo>) -> Self {
+        let board = Board::from_ruleset(&ruleset);
         Self {
             logs: Vec::new(),
             board,
+            ruleset,
             plugins,
-            // 默认管线：裁判先，兵种后（顺序决定语义）
-            endorse_order: vec!["judge".into(), "knight".into()],
+            // Lua 插件钩子默认空（M2 标准移动已数据驱动），按需挂载
+            endorse_order: Vec::new(),
         }
     }
 
@@ -60,7 +66,15 @@ impl Engine {
         };
         let from = unit.cell;
 
-        // —— 裁决管线 ——
+        // —— ① 数据驱动判定（主闸）——
+        match move_rules::can_move_on_board(&self.ruleset, &self.board, unit_id, to) {
+            crate::move_rules::MoveVerdict::Rejected(reason) => {
+                return Outcome::Rejected { reason };
+            }
+            crate::move_rules::MoveVerdict::Ok => {}
+        }
+
+        // —— ② Lua 自定义插件钩子（可选增强）——
         let mut reasons = Vec::new();
         for pname in &self.endorse_order {
             let plugin_rc = match self.plugins.get(pname) {
@@ -92,7 +106,7 @@ impl Engine {
 
     /// 从事件日志重放重建状态（确定性校验）。
     pub fn replay(&self) -> Board {
-        let mut b = Board::initial();
+        let mut b = Board::from_ruleset(&self.ruleset);
         for ev in &self.logs {
             b.apply(ev);
         }
@@ -108,21 +122,9 @@ impl Engine {
     pub fn logs_hash(&self) -> String {
         let mut h = Sha256::new();
         for ev in &self.logs {
-            let line = match ev {
-                Event::MoveAccepted { unit, from, to } => {
-                    format!("move:{}:{}:{}", unit, from, to)
-                }
-            };
-            h.update(line.as_bytes());
-            h.update(b"\n");
+            // 确定性：serde 序列化 enum/struct，无随机/墙钟
+            h.update(serde_json::to_string(ev).expect("event serializable"));
         }
-        format!("{:x}", h.finalize())
-    }
-
-    /// 当前状态规范 JSON 的 SHA-256
-    pub fn board_hash(&self) -> String {
-        let mut h = Sha256::new();
-        h.update(self.board.to_canonical_json().as_bytes());
         format!("{:x}", h.finalize())
     }
 }

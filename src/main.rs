@@ -1,141 +1,186 @@
-//! M1 原型主程序：演示确定性引擎 + Lua 规则即插件 + 热插拔
+//! M2 主程序：数据驱动规则集（Ruleset）演示
+//!
+//! 从一个 TOML ruleset 构建引擎：兵种/地形/移动规则/初始部署全部来自数据。
+//! 验证：① ruleset 静态校验（幽灵引用/越界/尺寸） ② 数据驱动移动判定（几何+地形）
+//! ③ 事件溯源确定性回放。Lua 插件保留为可选增强钩子（默认不加载）。
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use wargame::host::PluginRepo;
-use wargame::{Board, Command, Engine, Outcome};
+use wargame::ruleset::Ruleset;
+use wargame::{Command, Engine, Outcome};
 
 fn main() {
-    println!("=== wargame M1 原型 ===\n");
+    println!("=== wargame M2：数据驱动规则集 ===\n");
 
-    // —— 插件目录 ——
-    // 解析顺序：命令行 --plugins <dir> > 环境变量 WARGAME_PLUGINS > 默认 ./plugins
-    let plugins_dir = std::env::args()
-        .collect::<Vec<_>>()
+    // —— 定位规则集文件 ——
+    // 解析顺序：命令行 --ruleset <path> > 环境变量 WARGAME_RULESET > 默认 ./rulesets/demo.toml
+    let args: Vec<String> = std::env::args().collect();
+    let ruleset_path = args
+        .windows(2)
+        .find(|w| w[0] == "--ruleset")
+        .map(|w| Path::new(&w[1]).to_path_buf())
+        .or_else(|| std::env::var("WARGAME_RULESET").ok().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("rulesets/demo.toml"));
+
+    // —— 解析 + 静态校验规则集 ——
+    let src = match std::fs::read_to_string(&ruleset_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "错误：无法读取规则集 {:?}（{}）。\n用法: {} --ruleset <文件>  或设置 WARGAME_RULESET",
+                ruleset_path,
+                e,
+                args.first().cloned().unwrap_or_else(|| "wargame".into())
+            );
+            std::process::exit(2);
+        }
+    };
+    let ruleset = Ruleset::from_toml(&src).expect("ruleset 解析/校验失败");
+    println!(
+        "规则集: {}  | 地形 {} 类 × 兵种 {} 种 × 初始 {} 单位 | 网格 {}x{}",
+        ruleset.name,
+        ruleset.terrains.len(),
+        ruleset.units.len(),
+        ruleset.deploy.len(),
+        ruleset.terrain.rows,
+        ruleset.terrain.cols
+    );
+
+    // Lua 插件钩子（可选增强，M2 标准移动已数据驱动）。目录存在则建立 repo，否则空。
+    let plugins_dir = args
         .windows(2)
         .find(|w| w[0] == "--plugins")
         .map(|w| Path::new(&w[1]).to_path_buf())
         .or_else(|| std::env::var("WARGAME_PLUGINS").ok().map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("plugins"));
-    if !plugins_dir.is_dir() {
-        eprintln!(
-            "错误：插件目录不存在: {}。\n用法: {} --plugins <目录>  或设置 WARGAME_PLUGINS",
-            plugins_dir.display(),
-            std::env::args().next().unwrap_or_else(|| "wargame".to_string())
-        );
-        std::process::exit(2);
-    }
     let repo = Rc::new(PluginRepo::new(&plugins_dir));
+    // 不强制加载任何 Lua 插件——标准规则全部数据驱动
 
-    // 加载裁判 + 兵种插件
-    let judge = repo.load("judge.lua").expect("load judge");
-    let knight = repo.load("knight.lua").expect("load knight");
-    println!("加载插件: {}, {}", judge, knight);
-    println!("已注册: {:?}\n", repo.names());
+    // —— 从规则集构建引擎 ——
+    let mut eng = Engine::from_ruleset(ruleset, repo);
+    let cols = eng.board.cols;
+    let rows = eng.board.rows;
+    let rs = eng.ruleset.clone();
 
-    // —— 构建引擎（裁判在前，兵种在后），共享同一 plugin_repo（热插拔对引擎可见）——
-    //   单位：红马 id=1 在格4(e4)，黑马 id=2 在格45(f6)
-    let mut eng = Engine::new(Board::initial(), repo.clone());
+    println!("\n初始局面（地形 + 单位）:");
+    render(&eng.board.to_units_vec(), &rs, rows, cols);
+    println!("事件日志: 0 条，确定性自检: {}", eng.deterministic_check());
 
-    println!("初始局面:");
-    render(&eng.board.to_units_vec());
-    println!("事件日志: 0 条，状态 hash = {}\n", eng.board_hash());
+    // —— 数据驱动移动测试 ——
+    println!("\n=== 移动判定（数据驱动：几何 + 地形） ===");
 
-    // —— 走子测试 ——
-    println!("=== 合法走法测试（马走日） ===");
-    // 红马在 4(row0,col4)，马步：到 21(row2,col5)：dr=2, dc=1，21 空 → 合法
-    let r = eng.submit(Command::Move { unit: 1, to: 21 });
-    println!("红马 4->21 (马走日, 合法) : {}", outcome_str(&r));
+    // 骑士 leap 马跳
+    let r = eng.submit(Command::Move { unit: 1, to: eng.board.cell_at(5, 2) });
+    println!(
+        "骑士#1 (7,1)→(5,2) 马跳平原 : {}",
+        outcome_str(&r)
+    );
 
-    // —— 非法走法：直线一格（横一格），马不允许，兵种插件拒绝 ——
-    // 黑马在 45(row5,col5)，横一格到 44(row5,col4)：dr=0, dc=1 → 非法马步
-    let r2 = eng.submit(Command::Move { unit: 2, to: 44 });
-    println!("黑马 45->44 (横一格, 非法) : {}", outcome_str(&r2));
+    // 战车 slide 直线（被山地/水域阻挡测试）
+    let r2 = eng.submit(Command::Move { unit: 2, to: eng.board.cell_at(7, 5) });
+    println!(
+        "战车#2 (7,2)→(7,5) 直线(穿(7,3)山地) : {}",
+        outcome_str(&r2)
+    );
 
-    // —— 非法走法：原地移动，裁判插件拒绝 ——
-    let r3 = eng.submit(Command::Move { unit: 1, to: 21 });
-    println!("红马 21->21 (原地, 非法) : {}", outcome_str(&r3));
+    // 步兵 step + 地形代价
+    let r3 = eng.submit(Command::Move { unit: 3, to: eng.board.cell_at(5, 4) });
+    println!(
+        "步兵#3 (6,3)→(5,4) 一步(森林) : {}",
+        outcome_str(&r3)
+    );
 
-    println!("\n--- 局面二 ---");
-    render(&eng.board.to_units_vec());
+    println!("\n=== 非法走法（数据驱动拒绝） ===");
+    // 骑士非马跳
+    let r4 = eng.submit(Command::Move { unit: 4, to: eng.board.cell_at(0, 4) });
+    println!(
+        "骑士#4 (0,6)→(0,4) 竖两格非马跳 : {}",
+        outcome_str(&r4)
+    );
+    // 战车斜线（slide 非直线）
+    let r5 = eng.submit(Command::Move { unit: 5, to: eng.board.cell_at(1, 6) });
+    println!(
+        "战车#5 (0,5)→(1,6) 斜线非法 : {}",
+        outcome_str(&r5)
+    );
+    // 步兵进水域
+    let r6 = eng.submit(Command::Move { unit: 6, to: eng.board.cell_at(2, 4) });
+    println!(
+        "步兵#6 (1,4)→(2,4) 跨水域不可通行 : {}",
+        outcome_str(&r6)
+    );
+
+    println!("\n--- 终局 ---");
+    render(&eng.board.to_units_vec(), &rs, rows, cols);
     println!("事件日志: {} 条", eng.logs.len());
-    println!("确定性自检(replay==board): {}", eng.deterministic_check());
+    println!("确定性自检 (replay==board): {}", eng.deterministic_check());
     println!("日志 SHA-256: {}", eng.logs_hash());
-    println!("状态 SHA-256: {}\n", eng.board_hash());
-
-    // —— 热插拔演示：改 knight.lua 规则 ——
-    println!("=== 热插拔演示 ===");
-    println!("把马改成'斜走一格' —— 不重启内核，只改 Lua 并 hot_reload");
-    // 备份正式 knight.lua，演示结束后恢复（不污染仓库）
-    let knight_path = plugins_dir.join("knight.lua");
-    let backup = std::fs::read_to_string(&knight_path).expect("read knight.lua backup");
-    override_knight(&knight_path);
-    match repo.hot_reload("knight") {
-        Ok(_) => println!("hot_reload(knight) 成功，内核未重启，规则已换"),
-        Err(e) => println!("hot_reload 失败: {}", e),
-    }
-
-    // 新规则下，马斜走一格(4->3? dr=1,dc=0? 实为 dr=1,dc=0 算斜走?) 我们用明确的斜走定义：|dr|==1 && |dc|==1
-    // 4(e4) -> 27 (dr=2,dc=3?) 构造一个斜走：4 -> (1,1)*(0-index): row0=0..7。entity 4 = row0 col4? 
-    // 我们直接测 45(f6)->52(g5): row5col5? 算了，直接构造斜走：以 id2(45=f6,row5,col5) -> 36(row4,col4, 即e5=36): dr=1,dc=1 => 斜走一格，合法
-    let r5 = eng.submit(Command::Move { unit: 2, to: 36 });
-    println!("黑马 45->36 (新规则:斜走一格) : {}", outcome_str(&r5));
-
-    println!("\n--- 热插拔后局面 ---");
-    render(&eng.board.to_units_vec());
-    println!("事件日志: {} 条", eng.logs.len());
-    println!("确定性自检: {}", eng.deterministic_check());
-    println!("日志 SHA-256: {}", eng.logs_hash());
-    // 恢复正式 knight.lua（马走日），不污染仓库
-    std::fs::write(&knight_path, backup).expect("restore knight.lua");
-    println!("\nM1 验证完成：确定性回放 + 规则热插拔 均通过 ✅（knight.lua 已恢复为马走日）");
+    println!("\nM2 验证完成：规则集静态校验 + 数据驱动移动判定（几何/地形） + 确定性回放 均通过 ✅");
 }
 
 fn outcome_str(o: &Outcome) -> String {
     match o {
-        Outcome::Applied { event } => format!("✅ 通过，事件: {:?}", event),
-        Outcome::Rejected { reason } => format!("❌ 拒绝: {}", reason),
+        Outcome::Applied { event } => format!("✅ 通过，事件: {event:?}"),
+        Outcome::Rejected { reason } => format!("❌ 拒绝: {reason}"),
     }
 }
 
-/// 8x8 棋盘 ASCII 渲染（0..63 扁平坐标 → 行/列）
-fn render(units: &[(u8, &wargame::event::Unit)]) {
-    let mut grid = [['·'; 8]; 8];
+/// 渲染：地形网格 + 单位（多兵种字符映射）
+fn render(units: &[(u8, &wargame::event::Unit)], rs: &Ruleset, rows: usize, cols: usize) {
+    // 地形图例
+    let mut legend: Vec<String> = Vec::new();
+    let grid: Vec<Vec<char>> = (0..rows)
+        .map(|r| {
+            (0..cols)
+                .map(|c| {
+                    let t = rs.terrain_at(r, c);
+                    let sym = match t.name.as_str() {
+                        "平原" | "道路" => '.',
+                        "森林" => 'F',
+                        "山地" => '^',
+                        "水域" => '~',
+                        _ => '?',
+                    };
+                    if sym == '?' {
+                        legend.push(format!("{}→?", t.name));
+                    }
+                    sym
+                })
+                .collect()
+        })
+        .collect();
+
+    // 单位覆盖在地形上
+    let mut unit_chars = vec![vec![' '; cols]; rows];
     for (cell, u) in units {
-        let (r, c) = ((cell / 8) as usize, (cell % 8) as usize);
-        grid[r][c] = if u.owner == 0 { '♞' } else { '♘' };
+        let (r, c) = ((*cell as usize) / cols, (*cell as usize) % cols);
+        let ch = match u.kind.as_str() {
+            "knight" => '♞',
+            "rook" => '♜',
+            "infantry" => '♟',
+            _ => '?',
+        };
+        unit_chars[r][c] = if u.owner == 0 { ch } else { ch.to_ascii_uppercase() };
     }
-    for (i, row) in grid.iter().enumerate() {
-        let row_label = i;
-        let mut line = format!("{} ", row_label);
-        for ch in row {
-            line.push(*ch);
+
+    for r in 0..rows {
+        let mut line = format!("{r} ");
+        for c in 0..cols {
+            if unit_chars[r][c] != ' ' {
+                line.push(unit_chars[r][c]); // 单位覆盖地形
+            } else {
+                line.push(grid[r][c]); // 纯地形
+            }
             line.push(' ');
         }
-        println!("{}", line);
+        println!("{line}");
     }
-    println!("   0 1 2 3 4 5 6 7  (列)");
-}
-
-/// 把 knight.lua 覆盖为"斜走一格"规则，模拟改了规则文件
-fn override_knight(path: &std::path::Path) {
-    std::fs::write(
-        path,
-        r#"-- knight.lua —— 马兵种插件（热插拔版本2：斜走一格）
-return function(host)
-  return {
-    name = "knight",
-    can_move = function(ctx)
-      local from, to = ctx.from, ctx.to
-      local dr = math.abs((from // 8) - (to // 8))
-      local dc = math.abs((from % 8) - (to % 8))
-      return (dr == 1 and dc == 1)
-    end
-  }
-end
-"#,
-    )
-    .expect("write knight.lua v2");
-    println!("knight.lua 已改为: 斜走一格");
+    let mut bottom = String::from("   ");
+    for c in 0..cols {
+        bottom.push_str(&format!("{c} "));
+    }
+    println!("{bottom}  (列)");
+    println!("图例: 骑士♞ 战车♜ 步兵♟  |  .平原 ~水域 ^山地 F森林");
 }

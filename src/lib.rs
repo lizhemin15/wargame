@@ -13,6 +13,8 @@ pub mod board;
 pub mod engine;
 pub mod event;
 pub mod host;
+pub mod move_rules;
+pub mod ruleset;
 
 pub use board::Board;
 pub use engine::{Engine, Outcome};

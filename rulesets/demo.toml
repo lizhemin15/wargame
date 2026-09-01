@@ -1,0 +1,125 @@
+# 演示规则集：多兵种 + 地形（题材中立通用兵棋）
+# 数据驱动：全部规则在此文件，无任何 Rust/逻辑骨架之外的东西。
+# 改这里 = 改规则，热插拔引擎自动生效。
+
+name = "demo-common"
+
+# ---- 地形 ----
+[terrains]
+[terrains.plain]
+name = "平原"
+symbol = "."
+move_cost = 1
+
+[terrains.road]
+name = "道路"
+symbol = "r"
+move_cost = 1
+
+[terrains.forest]
+name = "森林"
+symbol = "F"
+move_cost = 2
+defense_bonus = 30
+
+[terrains.mountain]
+name = "山地"
+symbol = "^"
+move_cost = 4              # 代价高，通行慢
+defense_bonus = 50
+
+[terrains.water]
+name = "水域"
+symbol = "~"
+move_cost = 0              # 不可通行
+
+# ---- 兵种类别（通行系数） ----
+[unit_classes]
+[unit_classes.infantry]
+name = "步兵类"
+move_cost = 1
+
+[unit_classes.mounted]
+name = "骑乘类"
+move_cost = 1
+
+# ---- 兵种 ----
+[units]
+[units.knight]
+name = "骑士"
+class = "mounted"
+move_points = 3
+move_style = "leap"                     # 跳跃，无视路径地形
+move_offsets = [[2,1],[1,2],[-1,2],[-2,1],[-2,-1],[-1,-2],[1,-2],[2,-1]]
+attack = 4
+defense = 3
+
+[units.rook]
+name = "战车"
+class = "mounted"
+move_points = 5
+move_style = "slide"                    # 滑行，直线走到阻挡/移动点尽
+move_offsets = [[1,0],[-1,0],[0,1],[0,-1]]
+attack = 5
+defense = 4
+
+[units.infantry]
+name = "步兵"
+class = "infantry"
+move_points = 2
+move_style = "step"                     # 单步，受地形代价约束
+move_offsets = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]
+attack = 2
+defense = 2
+
+# ---- 地形网格（8x8，'.'=平原, '~'=水, '^'=山地, 'F'=森林） ----
+[terrain]
+rows = 8
+cols = 8
+cells = [
+  "F",".",".",".","^",".",".","F",
+  ".",".",".",".","^",".",".",".",
+  ".",".","~","~","~",".",".",".",
+  ".",".","~","F","~",".",".",".",
+  ".",".","~","~","~",".",".",".",
+  ".",".",".",".",".",".",".",".",
+  "F",".",".",".",".",".",".",".",
+  ".",".",".","^",".",".",".","F",
+]
+
+# ---- 初始部署 ----
+[[deploy]]
+kind = "knight"
+row = 7
+col = 1
+owner = 0
+
+[[deploy]]
+kind = "rook"
+row = 7
+col = 2
+owner = 0
+
+[[deploy]]
+kind = "infantry"
+row = 6
+col = 3
+owner = 0
+
+[[deploy]]
+kind = "knight"
+row = 0
+col = 6
+owner = 1
+
+[[deploy]]
+kind = "rook"
+row = 0
+col = 5
+owner = 1
+
+[[deploy]]
+kind = "infantry"
+row = 1
+col = 4
+owner = 1
