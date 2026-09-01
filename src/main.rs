@@ -1,6 +1,6 @@
 //! M1 原型主程序：演示确定性引擎 + Lua 规则即插件 + 热插拔
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use wargame::host::PluginRepo;
@@ -10,7 +10,22 @@ fn main() {
     println!("=== wargame M1 原型 ===\n");
 
     // —— 插件目录 ——
-    let plugins_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins");
+    // 解析顺序：命令行 --plugins <dir> > 环境变量 WARGAME_PLUGINS > 默认 ./plugins
+    let plugins_dir = std::env::args()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|w| w[0] == "--plugins")
+        .map(|w| Path::new(&w[1]).to_path_buf())
+        .or_else(|| std::env::var("WARGAME_PLUGINS").ok().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("plugins"));
+    if !plugins_dir.is_dir() {
+        eprintln!(
+            "错误：插件目录不存在: {}。\n用法: {} --plugins <目录>  或设置 WARGAME_PLUGINS",
+            plugins_dir.display(),
+            std::env::args().next().unwrap_or_else(|| "wargame".to_string())
+        );
+        std::process::exit(2);
+    }
     let repo = Rc::new(PluginRepo::new(&plugins_dir));
 
     // 加载裁判 + 兵种插件
@@ -51,8 +66,11 @@ fn main() {
 
     // —— 热插拔演示：改 knight.lua 规则 ——
     println!("=== 热插拔演示 ===");
-    println!("把马改成'斜走一格'(ruler2) —— 不重启内核，只改 Lua 并 hot_reload");
-    override_knight(plugins_dir.join("knight.lua"));
+    println!("把马改成'斜走一格' —— 不重启内核，只改 Lua 并 hot_reload");
+    // 备份正式 knight.lua，演示结束后恢复（不污染仓库）
+    let knight_path = plugins_dir.join("knight.lua");
+    let backup = std::fs::read_to_string(&knight_path).expect("read knight.lua backup");
+    override_knight(&knight_path);
     match repo.hot_reload("knight") {
         Ok(_) => println!("hot_reload(knight) 成功，内核未重启，规则已换"),
         Err(e) => println!("hot_reload 失败: {}", e),
@@ -69,7 +87,9 @@ fn main() {
     println!("事件日志: {} 条", eng.logs.len());
     println!("确定性自检: {}", eng.deterministic_check());
     println!("日志 SHA-256: {}", eng.logs_hash());
-    println!("\nM1 验证完成：确定性回放 + 规则热插拔 均通过 ✅");
+    // 恢复正式 knight.lua（马走日），不污染仓库
+    std::fs::write(&knight_path, backup).expect("restore knight.lua");
+    println!("\nM1 验证完成：确定性回放 + 规则热插拔 均通过 ✅（knight.lua 已恢复为马走日）");
 }
 
 fn outcome_str(o: &Outcome) -> String {
@@ -99,7 +119,7 @@ fn render(units: &[(u8, &wargame::event::Unit)]) {
 }
 
 /// 把 knight.lua 覆盖为"斜走一格"规则，模拟改了规则文件
-fn override_knight(path: std::path::PathBuf) {
+fn override_knight(path: &std::path::Path) {
     std::fs::write(
         path,
         r#"-- knight.lua —— 马兵种插件（热插拔版本2：斜走一格）

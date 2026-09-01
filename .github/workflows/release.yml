@@ -51,19 +51,28 @@ jobs:
         run: |
           ls -la target/${{ matrix.target }}/release/
 
-      # 打包：二进制 + 安装说明
+      # 打包：一键安装包（目录含 二进制 + plugins/ + 说明）
       - name: Package
         shell: bash
         run: |
           set -euo pipefail
           BIN="target/${{ matrix.target }}/release/wargame${{ matrix.ext }}"
-          PKG="wargame-${{ matrix.suffix }}${{ matrix.ext }}"
-          mkdir -p dist
-          cp "$BIN" "dist/$PKG"
-          # 附带许可证 / 说明
-          cp LICENSE dist/ 2>/dev/null || true
-          cp README.md dist/ 2>/dev/null || true
-          echo "packaged: dist/$PKG"
+          # 组装发布目录（内外同结构，解压后直接进目录运行）
+          ROOT="dist/wargame-${{ matrix.suffix }}"
+          mkdir -p "$ROOT"/plugins
+          cp "$BIN" "$ROOT/wargame${{ matrix.ext }}"
+          cp plugins/*.lua "$ROOT/plugins/"
+          cp README.md LICENSE "$ROOT/" 2>/dev/null || true
+          # 压缩：windows 用 PowerShell 内置 Compress-Archive 打 zip（GUI 解压友好），类unix 用 tar.gz
+          BINB=${{ matrix.ext }}
+          if [ -n "$BINB" ]; then
+            # windows → zip（用 powershell 内置，避免 tar 不支持 zip）
+            powershell -Command "Compress-Archive -Path 'dist/wargame-${{ matrix.suffix }}/*' -DestinationPath 'dist/wargame-${{ matrix.suffix }}.zip' -Force"
+          else
+            # linux / mac → tar.gz
+            tar -C dist -czf "dist/wargame-${{ matrix.suffix }}.tar.gz" "wargame-${{ matrix.suffix }}"
+          fi
+          ls -la dist/*.tar.gz dist/*.zip 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
