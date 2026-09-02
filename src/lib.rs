@@ -16,6 +16,7 @@ pub mod host;
 pub mod combat;
 pub mod move_rules;
 pub mod ruleset;
+pub mod snapshot;
 
 pub use board::Board;
 pub use engine::{Engine, Outcome};

@@ -19,36 +19,56 @@ use crate::event::{Cell, Unit};
 pub struct Plugin {
     pub name: String,
     pub lua_rc: Rc<Lua>,
-    pub can_move: Box<dyn Fn(&Unit, Cell, Cell, &Board) -> bool>,
+    /// 走子判定钩子（可变）。纯渲染插件可为 None.。
+    pub can_move: Option<Box<dyn Fn(&Unit, Cell, Cell, &Board) -> bool>>,
+    /// 渲染钩子（可选）。输入快照 Lua 表，返回任意可序列化值（字符串/表）。
+    pub render: Option<Box<dyn Fn(&Table) -> mlua::Value>>,
 }
 
 impl Plugin {
     fn from_table(lua_rc: Rc<Lua>, t: &Table, plugin_name: &str) -> Result<Plugin, mlua::Error> {
-        let can_move_fn = t.get::<mlua::Function>("can_move")?;
-        let lua = lua_rc.clone();
-        let can_move: Box<dyn Fn(&Unit, Cell, Cell, &Board) -> bool> =
-            Box::new(move |unit, from, to, board| {
-                let ctx = lua.create_table().expect("ctx table");
-                let unit_t = lua.create_table().expect("unit table");
-                let _ = unit_t.set("id", unit.id);
-                let _ = unit_t.set("kind", unit.kind.clone());
-                let _ = unit_t.set("cell", unit.cell);
-                let _ = unit_t.set("owner", unit.owner);
-                let _ = ctx.set("unit", unit_t);
-                let _ = ctx.set("from", from);
-                let _ = ctx.set("to", to);
-                // 占位视图：目标格是否被占（1-indexed Lua 数组风格）
-                let occ_t = lua.create_table().expect("occ table");
-                for (c, _uid) in board.occ.iter() {
-                    let _ = occ_t.set(*c + 1, true);
-                }
-                let _ = ctx.set("board", occ_t);
-                can_move_fn.call::<bool>(ctx).unwrap_or(false)
-            });
+        // can_move 可选：取不到就设 None（允许纯渲染插件存在）
+        let can_move = match t.get::<mlua::Function>("can_move") {
+            Ok(f) => {
+                let lua = lua_rc.clone();
+                let f2 = f.clone();
+                Some(Box::new(move |unit: &Unit, from: Cell, to: Cell, board: &Board| {
+                    let ctx = lua.create_table().expect("ctx table");
+                    let unit_t = lua.create_table().expect("unit table");
+                    let _ = unit_t.set("id", unit.id);
+                    let _ = unit_t.set("kind", unit.kind.clone());
+                    let _ = unit_t.set("cell", unit.cell);
+                    let _ = unit_t.set("owner", unit.owner);
+                    let _ = ctx.set("unit", unit_t);
+                    let _ = ctx.set("from", from);
+                    let _ = ctx.set("to", to);
+                    let occ_t = lua.create_table().expect("occ table");
+                    for (c, _uid) in board.occ.iter() {
+                        let _ = occ_t.set(*c + 1, true);
+                    }
+                    let _ = ctx.set("board", occ_t);
+                    f2.call::<bool>(ctx).unwrap_or(false)
+                }) as Box<dyn Fn(&Unit, Cell, Cell, &Board) -> bool>)
+            }
+            Err(_) => None,
+        };
+
+        // render 可选：取到就包一层
+        let render = match t.get::<mlua::Function>("render") {
+            Ok(f) => {
+                let f2 = f.clone();
+                Some(Box::new(move |snap: &Table| {
+                    f2.call::<mlua::Value>(snap.clone())
+                        .unwrap_or(mlua::Value::Nil)
+                }) as Box<dyn Fn(&Table) -> mlua::Value>)
+            }
+            Err(_) => None,
+        };
         Ok(Plugin {
             name: plugin_name.to_string(),
             lua_rc,
             can_move,
+            render,
         })
     }
 }

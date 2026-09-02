@@ -108,7 +108,10 @@ impl Engine {
                     }
                 }
             };
-            let ok = (plugin_rc.can_move)(&unit, from, to, &self.board);
+            let ok = match &(plugin_rc.can_move) {
+                Some(cm) => (cm)(&unit, from, to, &self.board),
+                None => true, // 纯渲染插件无走子钩子，不拦截
+            };
             if !ok {
                 reasons.push(pname.clone());
             }

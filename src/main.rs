@@ -9,7 +9,8 @@ use std::rc::Rc;
 
 use wargame::host::PluginRepo;
 use wargame::ruleset::Ruleset;
-use wargame::{Command, Engine, Outcome};
+use wargame::{Engine, Outcome};
+use wargame::snapshot;
 
 fn main() {
     println!("=== wargame M2：数据驱动规则集 ===\n");
@@ -58,8 +59,14 @@ fn main() {
     let repo = Rc::new(PluginRepo::new(&plugins_dir));
     // 不强制加载任何 Lua 插件——标准规则全部数据驱动
 
+    // 可选渲染插件：--render <plugin_name>（从 plugins 目录加载）
+    let render_plugin = args
+        .windows(2)
+        .find(|w| w[0] == "--render")
+        .map(|w| w[1].clone());
+
     // —— 从规则集构建引擎 ——
-    let mut eng = Engine::from_ruleset(ruleset, repo);
+    let mut eng = Engine::from_ruleset(ruleset, repo.clone());
     let cols = eng.board.cols;
     let rows = eng.board.rows;
     let rs = eng.ruleset.clone();
@@ -74,6 +81,45 @@ fn main() {
         songhu_demo(&mut eng, &rs, rows, cols);
     } else {
         demo_demo(&mut eng, &rs, rows, cols);
+    }
+
+    // —— 可选渲染插件：终局后用稳定快照调用 ——
+    if let Some(pname) = &render_plugin {
+        let plugin = match repo.get(pname).or_else(|| {
+            repo.load(&format!("{pname}.lua")).ok().and_then(|n| repo.get(&n))
+        }) {
+            Some(p) => p,
+            None => {
+                eprintln!("无法加载渲染插件 [{pname}]（未在 --plugins 目录找到 {pname}.lua）");
+                return;
+            }
+        };
+        // 构建稳定快照 → Lua 表 → 调 render 钩子
+        let snap = snapshot::build(&eng.board, &rs, &eng.logs, eng.winner());
+        let lua = plugin.lua_rc.clone();
+        let st = snapshot::to_lua(&lua, &snap, &|kind: &str| kind.to_string());
+        match &plugin.render {
+            Some(render_fn) => {
+                let v = render_fn(&st);
+                match v {
+                    mlua::Value::String(s) => {
+                        let txt = s.to_string_lossy();
+                        println!("\n── 渲染插件 [{pname}] 输出(文本) ──\n{}", txt)
+                    }
+                    other => {
+                        use mlua::LuaSerdeExt;
+                        match lua.from_value::<serde_json::Value>(other) {
+                            Ok(j) => println!(
+                                "\n── 渲染插件 [{pname}] 输出(JSON) ──\n{}",
+                                serde_json::to_string_pretty(&j).unwrap()
+                            ),
+                            Err(e) => eprintln!("渲染插件返回值无法 JSON 化: {e}"),
+                        }
+                    }
+                }
+            }
+            None => eprintln!("插件 [{pname}] 没有 render 钩子"),
+        }
     }
 }
 
