@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>兵棋 · 淞沪会战</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #111418;
+    --panel2: #161a20;
+    --border: #232833;
+    --text: #e6e9ee;
+    --muted: #8b93a1;
+    --accent: #5b8def;
+    --red: #e05d5d;
+    --blue: #5d8fe0;
+    --green: #4cc38a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 24px 60px; }
+  header { display: flex; align-items: baseline; justify-content: space-between;
+    padding: 18px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: .5px; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 10px; }
+  .topbar { display: flex; gap: 12px; align-items: center; }
+  .btn { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .12s; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .status { color: var(--muted); font-size: 13px; }
+  .status b { color: var(--text); font-weight: 600; }
+
+  .layout { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 20px; }
+  .board-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; overflow-x: auto; }
+  .board-meta { display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+  .board-meta .legend { display: flex; gap: 14px; flex-wrap: wrap; }
+  .legend .item { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .grid { display: grid; gap: 2px; background: var(--panel2); padding: 8px;
+    border-radius: 8px; width: fit-content; margin: 0 auto; }
+  .cell { position: relative; width: 34px; height: 34px; border-radius: 3px;
+    border: 1px solid rgba(255,255,255,.06); cursor: default; }
+  .cell.moveable { cursor: pointer; }
+  .cell.moveable:hover, .cell.selected-target { outline: 2px solid var(--green); outline-offset: -1px; }
+  .cell.target-enemy { cursor: pointer; }
+  .cell.target-enemy:hover { outline: 2px solid var(--red); outline-offset: -1px; }
+  .terrain { position: absolute; inset: 0; border-radius: 3px; display: flex;
+    align-items: center; justify-content: center; font-size: 13px; color: rgba(255,255,255,.28); }
+  .t-plain { background: #21262d; }
+  .t-water { background: #14243a; }
+  .t-hill { background: #2a2620; }
+  .t-forest { background: #1d2a20; }
+  .point { position: absolute; inset: 2px; border-radius: 3px;
+    border: 1.5px dashed rgba(255,255,255,.35); pointer-events: none; }
+  .point .pt { position: absolute; inset: 0; display:flex; align-items:center; justify-content:center;
+    font-size: 10px; color: rgba(255,255,255,.5); text-shadow:0 1px 2px rgba(0,0,0,.8); }
+
+  .unit { position: absolute; inset: 3px; border-radius: 5px; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer; transition: transform .1s, box-shadow .1s; }
+  .unit:hover { transform: scale(1.08); z-index: 5; }
+  .unit.owner0 { background: linear-gradient(180deg,#e4686a,#c14a4c); }
+  .unit.owner1 { background: linear-gradient(180deg,#64a0e8,#3f78c9); }
+  .unit.selected { outline: 2px solid #fff; outline-offset: 1px; box-shadow: 0 0 0 4px rgba(255,255,255,.15); }
+  .unit .mark { font-size: 14px; font-weight: 700; color: #fff; line-height: 1;
+    text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  .unit .hp { position: absolute; bottom: 1px; right: 3px; font-size: 9px;
+    color: rgba(255,255,255,.9); text-shadow: 0 1px 2px rgba(0,0,0,.6); font-weight: 600; }
+  .unit .nm { position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; white-space: nowrap; color: var(--muted); pointer-events: none; }
+
+  .side { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .side h3 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .6px; }
+  .unit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .unit-list li { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
+    padding: 8px 10px; cursor: pointer; font-size: 12.5px; transition: all .1s; }
+  .unit-list li:hover { border-color: var(--accent); }
+  .unit-list li.selected { border-color: #fff; }
+  .unit-list .r { color: var(--red); font-weight: 600; } .unit-list .b { color: var(--blue); font-weight: 600; }
+  .unit-list .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .logs { margin-top: 14px; }
+  .logs h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .6px; }
+  .log-list { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
+    padding: 10px; max-height: 260px; overflow-y: auto; font-size: 12px; color: var(--muted);
+    display: flex; flex-direction: column; gap: 5px; }
+  .log-list .ev { border-left: 2px solid var(--border); padding-left: 8px; }
+
+  .winner-banner { background: var(--accent); color: #fff; border-radius: 8px; padding: 12px 16px;
+    margin-top: 14px; font-size: 14px; font-weight: 600; display: none; }
+  .notice { color: var(--green); font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .notice.err { color: var(--red); }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .cell { width: 28px; height: 28px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>兵棋<small id="ruleset-name">加载中…</small></h1>
+    <div class="topbar">
+      <span class="status"><b id="stat-turn">—</b> · <span id="stat-units">—</span></span>
+      <button class="btn" id="btn-reset">重开</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="board-panel">
+      <div class="board-meta">
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="grid" id="grid" style="position:relative"></div>
+      <div class="notice" id="notice"></div>
+      <div class="winner-banner" id="winner"></div>
+    </div>
+
+    <div class="side">
+      <h3>部队</h3>
+      <ul class="unit-list" id="unit-list"></ul>
+      <div class="logs">
+        <h3>战报</h3>
+        <div class="log-list" id="logs"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const gridEl = $("#grid");
+  const unitListEl = $("#unit-list");
+  const logEl = $("#logs");
+  const noticeEl = $("#notice");
+  const winnerEl = $("#winner");
+
+  const T_TERRAIN = {
+    '.': { cls: 't-plain', label: '平原' },
+    '~': { cls: 't-water', label: '水域' },
+    '^': { cls: 't-hill', label: '高地' },
+    'F': { cls: 't-forest', label: '森林' },
+  };
+  const OWNER_NAME = ['国军', '日军'];
+  const OWNER_R = ['owner0', 'owner1'];
+
+  let meta = null;
+  let state = null;
+  let selectedUnit = null; // 当前选中的单位 id
+  let selectable = new Set(); // 可点选的我方单位
+  const unitIdToCell = new Map(); // unit.id -> cell index
+  const cellToUnit = new Map();   // cell index -> unit.id
+  const cellToPoint = new Map();  // cell index -> point
+  const unitName = new Map();     // unit.id -> display name
+
+  async function api(path, opts) {
+    const r = await fetch(path, opts);
+    if (!r.ok) throw new Error(path + ' -> ' + r.status);
+    return r.json();
+  }
+
+  // —— 加载元数据 ——
+  async function init() {
+    try {
+      meta = await api('/api/meta');
+      $("#ruleset-name").textContent = meta.name || '';
+      buildLegend();
+      await refresh();
+    } catch (e) {
+      noticeEl.textContent = '初始化失败: ' + e.message;
+      noticeEl.classList.add('err');
+    }
+  }
+
+  function buildLegend() {
+    const lg = $("#legend");
+    const items = [
+      ['#c14a4c', OWNER_NAME[0]], ['#3f78c9', OWNER_NAME[1]],
+      ['#21262d', '平原'], ['#14243a', '水域'], ['#2a2620', '高地'], ['#1d2a20', '森林'],
+    ];
+    lg.innerHTML = items.map(([c, n]) =>
+      `<span class="item"><span class="swatch" style="background:${c}"></span>${n}</span>`).join('');
+  }
+
+  async function refresh() {
+    state = await api('/api/state');
+    render();
+  }
+
+  // —— 渲染 ——
+  function render() {
+    unitIdToCell.clear(); cellToUnit.clear(); cellToPoint.clear(); unitName.clear();
+
+    const rows = state.rows, cols = state.cols;
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, 34px)`;
+    selectable = computeSelectable();
+
+    const cellEls = {};
+    let html = '';
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        const sym = state.terrain[idx] || '.';
+        const t = T_TERRAIN[sym] || T_TERRAIN['.'];
+        html += `<div class="cell" data-idx="${idx}" id="c${idx}"><div class="terrain ${t.cls}">${sym}</div></div>`;
+      }
+    }
+    gridEl.innerHTML = html;
+
+    // 要点
+    (state.points || []).forEach(p => {
+      const el = gridEl.querySelector(`#c${p.cell}`);
+      if (!el) return;
+      cellToPoint.set(p.cell, p);
+      const owner = p.owner >= 0 ? (' ' + OWNER_NAME[p.owner]) : ' 待争';
+      const el2 = document.createElement('div');
+      el2.className = 'point';
+      const ownerCls = p.owner === 0 ? '#e4686a' : p.owner === 1 ? '#64a0e8' : 'rgba(255,255,255,.5)';
+      el2.innerHTML = `<div class="pt" style="color:${ownerCls}">◎</div>`;
+      el2.title = p.name + owner;
+      el.appendChild(el2);
+    });
+
+    // 单位
+    (state.units || []).forEach(u => {
+      if (u.cell < 0) return; // 已消灭
+      unitIdToCell.set(u.id, u.cell);
+      cellToUnit.set(u.cell, u.id);
+      const nm = u.name || u.kind;
+      unitName.set(u.id, nm);
+      const el = gridEl.querySelector(`#c${u.cell}`);
+      if (!el) return;
+      const div = document.createElement('div');
+      div.className = 'unit ' + OWNER_R[u.owner];
+      div.dataset.id = u.id;
+      div.innerHTML = `<span class="mark">${nm.charAt(0)}</span><span class="hp">${u.hp}</span><span class="nm">${window.innerWidth < 900 ? '' : nm}</span>`;
+      div.title = `${nm} · ${OWNER_NAME[u.owner]} · hp ${u.hp}`;
+      div.addEventListener('click', e => { e.stopPropagation(); selectUnit(u.id); });
+      el.appendChild(div);
+    });
+
+    // 胜者横幅
+    if (state.winner >= 0) {
+      winnerEl.style.display = 'block';
+      winnerEl.textContent = `${OWNER_NAME[state.winner]} 获胜`;
+    } else {
+      winnerEl.style.display = 'none';
+    }
+
+    $("#stat-units").textContent = `${state.units.length} 单位`;
+    $("#stat-turn").textContent = meta ? meta.name : '';
+
+    renderUnitList();
+    renderLogs(state.logs || []);
+    highlight();
+  }
+
+  function computeSelectable() {
+    const s = new Set();
+    // 沙盘模式：全部单位可操作（引擎无轮替概念）
+    (state.units || []).forEach(u => { if (u.cell >= 0) s.add(u.id); });
+    return s;
+  }
+
+  function renderUnitList() {
+    const us = (state.units || []).filter(u => u.cell >= 0)
+      .sort((a, b) => a.owner - b.owner || a.id - b.id);
+    const groups = {};
+    us.forEach(u => { (groups[u.owner] ||= []).push(u); });
+    let html = '';
+    for (let o = 0; o < 2; o++) {
+      const arr = groups[o] || [];
+      if (!arr.length) continue;
+      html += `<li style="pointer-events:none;border:none;background:transparent;padding:2px 0 0;
+        font-size:11px;color:var(--muted);text-transform:uppercase">${OWNER_NAME[o]}</li>`;
+      arr.forEach(u => {
+        const nm = u.name || u.kind;
+        html += `<li data-id="${u.id}" class="${selectable.has(u.id) ? 'pick' : ''}">
+          <span class="${o === 0 ? 'r' : 'b'}">${nm}</span>
+          <div class="meta">hp ${u.hp} · ${u.kind}</div></li>`;
+      });
+    }
+    unitListEl.innerHTML = html;
+    unitListEl.querySelectorAll('li[data-id]').forEach(li => {
+      li.addEventListener('click', () => { const id = +li.dataset.id; selectUnit(id); });
+    });
+  }
+
+  function renderLogs(logs) {
+    if (!logs || !logs.length) {
+      logEl.innerHTML = '<div class="ev" style="color:#566">尚无事件</div>';
+      return;
+    }
+    logEl.innerHTML = logs.map(L => `<div class="ev">${L}</div>`).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // —— 选择与走子 ——
+  function selectUnit(id) {
+    if (!selectable.has(id)) { setNotice('该单位不可操作', true); return; }
+    selectedUnit = (selectedUnit === id) ? null : id;
+    cellToUnit.forEach((uid, cell) => {
+      const isTarget = (selectedUnit && uid !== selectedUnit && isEnemy(uid));
+      const el = gridEl.querySelector(`#c${cell}`);
+      if (!el) return;
+      el.classList.toggle('target-enemy', !!isTarget);
+      const marker = el.querySelector('.unit');
+      if (marker) marker.classList.toggle('selected', uid === selectedUnit);
+    });
+    unitListEl.querySelectorAll('li[data-id]').forEach(li =>
+      li.classList.toggle('selected', (+li.dataset.id) === selectedUnit));
+    if (selectedUnit) setNotice(`已选 ${unitName.get(selectedUnit)}，点击高亮格落子 / 敌方格攻击`);
+    else setNotice('');
+    // 标记可移动格（简化：全部空/敌格高亮）
+    highlightMoveTargets();
+  }
+
+  function isEnemy(uid) {
+    const me = (state.units || []).find(u => u.id === selectedUnit);
+    const them = (state.units || []).find(u => u.id === uid);
+    return me && them && me.owner !== them.owner;
+  }
+
+  function highlightMoveTargets() {
+    // 移除旧标记
+    gridEl.querySelectorAll('.cell.moveable, .cell.selected-target').forEach(el => {
+      el.classList.remove('moveable', 'selected-target');
+    });
+    if (!selectedUnit) return;
+    if (!isFinite(cellToUnit.get(selectedUnit)) || cellToUnit.get(selectedUnit) === undefined) return;
+    // 开放所有格为走子目标（引擎会拒绝非法走法）——MVP 简化，由服务端验证
+    const unitCell = unitIdToCell.get(selectedUnit);
+    if (unitCell === undefined) return;
+    // 只把同 owner 单位点标记为可移动落点（跳变简化）
+  }
+
+  function setNotice(msg, err) {
+    noticeEl.textContent = msg;
+    noticeEl.classList.toggle('err', !!err);
+  }
+
+  // —— 格子点击：走子/攻击 ——
+  gridEl.addEventListener('click', e => {
+    if (!selectedUnit) return;
+    const cellEl = e.target.closest('.cell');
+    if (!cellEl) return;
+    const idx = +cellEl.dataset.idx;
+    if (idx === unitIdToCell.get(selectedUnit)) { selectUnit(selectedUnit); return; }
+    const occ = cellToUnit.get(idx);
+    if (occ !== undefined && occ === selectedUnit) return;
+
+    const body = occ !== undefined && isEnemy(occ)
+      ? { kind: 'attack', unit: selectedUnit, target: occ }
+      : { kind: 'move', unit: selectedUnit, to: idx };
+
+    setNotice('提交指令…');
+    doMove(body);
+  });
+
+  async function doMove(body) {
+    try {
+      const res = await api('/api/move', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setNotice(`✓ ${res.message || '指令已执行'}`);
+        selectedUnit = null;
+        state = res.state;
+      } else {
+        setNotice(`✗ ${res.message || '非法走法'}`, true);
+      }
+      render();
+    } catch (e) {
+      setNotice('提交失败: ' + e.message, true);
+    }
+  }
+
+  $('#btn-reset').addEventListener('click', async () => {
+    try {
+      const res = await api('/api/reset', { method: 'POST' });
+      selectedUnit = null;
+      setNotice('已重置');
+      state = (res && res.state) ? res.state : await api('/api/state');
+      render();
+    } catch (e) { setNotice('重置失败: ' + e.message, true); }
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>

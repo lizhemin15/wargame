@@ -13,19 +13,53 @@ use wargame::{Engine, Outcome};
 use wargame::snapshot;
 
 fn main() {
+    // —— `serve` 子命令：Web 游戏服务器（W3）——
+    // wargame serve --ruleset rulesets/songhu.toml --addr 0.0.0.0:8080 [--plugins ./plugins]
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "serve") {
+        let ruleset_path = args
+            .windows(2)
+            .find(|w| w[0] == "--ruleset")
+            .map(|w| Path::new(&w[1]).to_path_buf())
+            .or_else(|| std::env::var("WARGAME_RULESET").ok().map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("rulesets/songhu.toml"));
+        let addr = args
+            .windows(2)
+            .find(|w| w[0] == "--addr")
+            .map(|w| w[1].clone())
+            .unwrap_or_else(|| "0.0.0.0:8080".to_string());
+        let plugins_dir = args
+            .windows(2)
+            .find(|w| w[0] == "--plugins")
+            .map(|w| w[1].clone())
+            .unwrap_or_else(|| "plugins".to_string());
+
+        let src = match std::fs::read_to_string(&ruleset_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("serve: 无法读取规则集 {:?}: {e}", ruleset_path);
+                std::process::exit(2);
+            }
+        };
+        match wargame::web::run(addr, &src, plugins_dir) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("serve 错误: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     println!("=== wargame M2：数据驱动规则集 ===\n");
 
-    // —— 定位规则集文件 ——
-    // 解析顺序：命令行 --ruleset <path> > 环境变量 WARGAME_RULESET > 默认 ./rulesets/demo.toml
-    let args: Vec<String> = std::env::args().collect();
+    // —— 解析 + 静态校验规则集 ——
     let ruleset_path = args
         .windows(2)
         .find(|w| w[0] == "--ruleset")
         .map(|w| Path::new(&w[1]).to_path_buf())
         .or_else(|| std::env::var("WARGAME_RULESET").ok().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("rulesets/demo.toml"));
-
-    // —— 解析 + 静态校验规则集 ——
+        .unwrap_or_else(|| PathBuf::from("rulesets/songhu.toml"));
     let src = match std::fs::read_to_string(&ruleset_path) {
         Ok(s) => s,
         Err(e) => {

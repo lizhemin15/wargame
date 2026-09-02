@@ -10,23 +10,26 @@
 use std::collections::BTreeMap;
 
 use mlua::{Lua, Table};
+use serde::Serialize;
 
 use crate::board::Board;
 use crate::event::{Event, PointId, Unit};
 use crate::ruleset::Ruleset;
 
 /// 单个单位在快照中的投影（字段固定，不跟 Unit 内部走）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SnapUnit {
     pub id: u16,
     pub kind: String,
     pub owner: i32,
     pub cell: i32, // 扁平索引；-1 = 已消灭
     pub hp: i32,
+    /// 展示名（优先 deploy 名，否则兵种名）——快照翻译层解析，不绑定 Unit 内部
+    pub name: String,
 }
 
 /// 单个要点在快照中的投影
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SnapPoint {
     pub id: i32,
     pub name: String,
@@ -35,6 +38,7 @@ pub struct SnapPoint {
 }
 
 /// 快照本体：稳定 schema，插件只认这一层
+#[derive(Serialize)]
 pub struct Snapshot {
     pub ruleset_name: String,
     pub rows: i32,
@@ -54,7 +58,8 @@ pub fn build(board: &Board, ruleset: &Ruleset, logs: &[Event], winner: Option<u8
         if u.hp == 0 {
             continue; // 已消灭的不进快照
         }
-        units.push(snap_unit(u));
+        let name = unit_display_name(ruleset, u);
+        units.push(snap_unit(u, name));
     }
     // 按 cell 排序，方便插件画图
     units.sort_by_key(|u| u.cell);
@@ -93,13 +98,38 @@ pub fn build(board: &Board, ruleset: &Ruleset, logs: &[Event], winner: Option<u8
     }
 }
 
-fn snap_unit(u: &Unit) -> SnapUnit {
+fn snap_unit(u: &Unit, name: String) -> SnapUnit {
     SnapUnit {
         id: u.id as u16,
         kind: u.kind.clone(),
         owner: u.owner as i32,
         cell: u.cell as i32,
         hp: u.hp as i32,
+        name,
+    }
+}
+
+/// 解析单位展示名：优先 deploy 条目的 name，否则回退兵种名。
+/// unit id 由部署顺序决定（id = deploy index + 1），故可反查 deploy。
+fn unit_display_name(ruleset: &Ruleset, u: &Unit) -> String {
+    if let Some(d) = ruleset.deploy.get(u.id as usize - 1) {
+        if let Some(n) = &d.name {
+            if !n.is_empty() {
+                return n.clone();
+            }
+        }
+    }
+    ruleset
+        .units
+        .get(&u.kind)
+        .map(|t| t.name.clone())
+        .unwrap_or_else(|| u.kind.clone())
+}
+
+impl Snapshot {
+    /// 序列化为紧凑 JSON（供 web / JSON 渲染插件消费）。
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("snapshot is serializable")
     }
 }
 

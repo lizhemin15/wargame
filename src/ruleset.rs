@@ -84,6 +84,9 @@ pub struct DeployEntry {
     /// 归属方（0=红方, 1=蓝方, ...）
     #[serde(default)]
     pub owner: u8,
+    /// 单位展示名（可选；缺省回退兵种名）
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// 可占领的要点/要地（胜利目标，动态易手）
