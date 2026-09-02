@@ -103,9 +103,27 @@
   .notice { color: var(--green); font-size: 12px; margin-top: 8px; min-height: 16px; }
   .notice.err { color: var(--red); }
 
+  /* 棋盘缩放容器：fit-to-width + 滚动平移 */
+  .board-scroll { overflow: auto; overscroll-behavior: contain; position: relative;
+    border-radius: 8px; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
+  .board-inner { position: relative; }
+  .board-inner .grid { transform-origin: 0 0; }
+  .board-zoom { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+  .board-zoom .zi { font-size: 12px; color: var(--muted); margin-right: auto; }
+  .board-zoom .btn { padding: 4px 10px; font-size: 12px; }
+  .zoom-controls { position: sticky; bottom: 8px; display: flex; gap: 6px; justify-content: center; }
+
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }
-    .cell { width: 28px; height: 28px; }
+    .board-panel { padding: 10px; }
+    .wrap { padding: 12px 12px 50px; }
+    header { flex-wrap: wrap; gap: 6px; }
+    h1 { font-size: 17px; }
+    .legend { font-size: 12px; gap: 10px; }
+    .unit-list li { padding: 8px 10px; }
+    /* 手机上单位名不显示，只显示标记，减小 cell 内部压力 */
+    .cell .unit .nm { display: none; }
+    .zoom-controls .btn { min-width: 44px; padding: 8px 0; text-align: center; }
   }
 </style>
 </head>
@@ -124,7 +142,17 @@
       <div class="board-meta">
         <div class="legend" id="legend"></div>
       </div>
-      <div class="grid" id="grid" style="position:relative"></div>
+      <div class="board-scroll" id="board-scroll">
+        <div class="board-inner" id="board-inner">
+          <div class="grid" id="grid" style="position:relative"></div>
+        </div>
+      </div>
+      <div class="board-zoom">
+        <span class="zi">缩放</span>
+        <button class="btn" id="zoom-out">−</button>
+        <button class="btn" id="zoom-reset">适配</button>
+        <button class="btn" id="zoom-in">＋</button>
+      </div>
       <div class="notice" id="notice"></div>
       <div class="winner-banner" id="winner"></div>
     </div>
@@ -144,7 +172,9 @@
 (() => {
   "use strict";
   const $ = s => document.querySelector(s);
-  const gridEl = $("#grid");
+  const gridEl = $(".grid");
+  const scrollEl = $("#board-scroll");
+  const innerEl = $("#board-inner");
   const unitListEl = $("#unit-list");
   const logEl = $("#logs");
   const noticeEl = $("#notice");
@@ -169,6 +199,45 @@
   const cellToUnit = new Map();   // cell index -> unit.id
   const cellToPoint = new Map();  // cell index -> point
   const unitName = new Map();     // unit.id -> display name
+  const CELL = 34;                // 每格像素（与 CSS .cell 一致）
+  const GAP = 2, GRID_PAD = 8;    // 格间距 / 棋盘内边距（与 CSS 一致）
+  let zoom = 1;                   // 用户缩放倍率；≤0 表示自动适配宽度
+  const MIN_CELL = 8;             // 缩放下限（cell 像素），防止缩过头
+  let lastScale = 1;
+
+  function naturalBoardSize() {
+    const rows = state ? state.rows : 15, cols = state ? state.cols : 21;
+    return {
+      w: cols * CELL + (cols - 1) * GAP + GRID_PAD * 2,
+      h: rows * CELL + (rows - 1) * GAP + GRID_PAD * 2,
+    };
+  }
+
+  // 计算应用 scale，并同步滚动容器内容尺寸，使“滚动 = 平移”
+  function applyScale() {
+    const nat = naturalBoardSize();
+    const avail = scrollEl.clientWidth || nat.w;
+    const fit = Math.min(1, (avail - GRID_PAD * 2) / nat.w) || 1;
+    // zoom 语义：0 适配；否则为绝对倍率（相对原生大小）
+    let s = zoom > 0 ? zoom * fit : fit;
+    // 下限保护
+    const minScale = MIN_CELL / CELL;
+    if (s < minScale) s = minScale;
+    lastScale = s;
+    gridEl.style.transform = `scale(${s})`;
+    innerEl.style.width = (nat.w * s) + 'px';
+    innerEl.style.height = (nat.h * s) + 'px';
+  }
+
+  // 缩放档位（相对适配基准）：1 适配 > 1.5x > 2.5x > 4x
+  const ZOOM_STEPS = [0, 1, 1.5, 2.5, 4];
+  function zoomBy(delta) {
+    const idx = ZOOM_STEPS.indexOf(zoom);
+    const next = idx === -1 ? 1 : ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, idx + delta))];
+    zoom = next;
+    applyScale();
+  }
+  function resetZoom() { zoom = 0; applyScale(); }
 
   async function api(path, opts) {
     const r = await fetch(path, opts);
@@ -209,7 +278,7 @@
     unitIdToCell.clear(); cellToUnit.clear(); cellToPoint.clear(); unitName.clear();
 
     const rows = state.rows, cols = state.cols;
-    gridEl.style.gridTemplateColumns = `repeat(${cols}, 34px)`;
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, ${CELL}px)`;
     selectable = computeSelectable();
 
     const cellEls = {};
@@ -270,6 +339,7 @@
     renderUnitList();
     renderLogs(state.logs || []);
     highlightMoveTargets();
+    applyScale();
   }
 
   function computeSelectable() {
@@ -400,6 +470,31 @@
       state = (res && res.state) ? res.state : await api('/api/state');
       render();
     } catch (e) { setNotice('重置失败: ' + e.message, true); }
+  });
+
+  // —— 缩放 ——
+  $('#zoom-in').addEventListener('click', () => zoomBy(+1));
+  $('#zoom-out').addEventListener('click', () => zoomBy(-1));
+  $('#zoom-reset').addEventListener('click', resetZoom);
+  // 双击棋盘放大/还原（移动端友好）
+  let lastTap = 0;
+  gridEl.addEventListener('touchend', e => {
+    if (e.target.closest('.unit') || e.target.closest('.cell')) {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        e.preventDefault();
+        zoomBy(zoom === 0 ? +1 : (zoom <= 1.5 ? +1 : -1));
+        lastTap = 0;
+      } else {
+        lastTap = now;
+      }
+    }
+  }, { passive: false });
+  // 窗口尺寸变化时重算适配
+  let resizeT;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(applyScale, 120);
   });
 
   init();
