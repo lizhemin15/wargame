@@ -10,6 +10,7 @@
 //!   ② Rust 事件溯源字节级确定性回放
 
 pub mod board;
+pub mod hex;
 pub mod engine;
 pub mod event;
 pub mod host;

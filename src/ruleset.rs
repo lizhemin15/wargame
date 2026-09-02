@@ -124,10 +124,29 @@ pub struct TerrainGrid {
     pub cells: Vec<String>,
 }
 
+/// 棋盘几何：方形(4邻/十字) 或 六边形(6邻/三轴)。默认方形，向后兼容。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Grid {
+    #[serde(alias = "square")]
+    Square,
+    #[serde(alias = "hex")]
+    Hex,
+}
+
+impl Default for Grid {
+    fn default() -> Self {
+        Grid::Square
+    }
+}
+
 /// 完整规则集
 #[derive(Debug, Clone, Deserialize)]
 pub struct Ruleset {
     pub name: String,
+    /// 棋盘几何（方形/六边形），默认方形
+    #[serde(default)]
+    pub grid: Grid,
     /// 地形定义表：id -> Terrain
     pub terrains: HashMap<String, Terrain>,
     /// 兵种类别表：id -> UnitClass
