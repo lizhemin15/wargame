@@ -46,12 +46,18 @@
   .grid { position: relative; margin: 0 auto; padding: 8px;
     background: var(--panel2); border-radius: 8px; }
   .cell { position: absolute; border-radius: 0; cursor: default;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); }
+  /* 高亮用独立伪元素画六边形边框，避免 clip-path 裁剪 box-shadow（移动端看不见） */
+  .cell::after { content: ""; position: absolute; inset: 1px; pointer-events: none;
     clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
-  .cell.moveable { cursor: pointer; box-shadow: inset 0 0 0 2px var(--green); }
+    box-sizing: border-box; }
+  .cell { box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+  .cell.moveable { cursor: pointer; }
+  .cell.moveable::after { border: 2px solid var(--green); }
   .cell.moveable:hover, .cell.selected-target:hover { filter: brightness(1.2); }
   .cell.target-enemy { cursor: pointer; }
-  .cell.target-enemy:hover { box-shadow: inset 0 0 0 2px var(--red); }
+  .cell.target-enemy::after { border: 2px solid var(--red); }
+  .cell.target-enemy:hover { filter: brightness(1.15); }
   .terrain { position: absolute; inset: 0; border-radius: 0; display: flex;
     align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
     color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 3px rgba(0,0,0,.6); }
